@@ -5,7 +5,7 @@ import telebot
 from flask import Flask
 
 # --- কনফিগারেশন ---
-TOKEN = "9059189356:AAGJ5YGLVw_cvvK8OQlkyX6hDYHtZBpMGPA"  # আপনার বটের টোকেন এখানে বসাবেন
+TOKEN = "9059189356:AAHti9AWiUSTUWDvPfH16bzqZR9Qnp53auo"  # আপনার বটের টোকেন এখানে বসাবেন
 ADMIN_ID = (
     7833766898  # আপনার টেলিগ্রাম আইডি (সংখ্যায় - যেমন: 612345678)
 )
