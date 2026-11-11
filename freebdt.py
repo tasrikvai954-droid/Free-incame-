@@ -7,7 +7,8 @@ from pymongo import MongoClient
 # --- কনফিগারেশন (আপনার তথ্যগুলো এখানে বসাবেন) ---
 TOKEN = "9059189356:AAGJ5YGLVw_cvvK8OQlkyX6hDYHtZBpMGPA"
 ADMIN_ID = 7833766898  # আপনার টেলিগ্রাম আইডি (সংখ্যায়)
-MONGO_URI = "YOUR_MONGODB_ATLAS_CONNECTION_STRING_HERE"
+MONGO_URI = "MONGO_URI = "mongodb://tasr1kva1954_db_user:MB9qXeRSuraCf8pj@ac-jx50sx1-shard-00-00.xzv6fcr.mongodb.net:27017,ac-jx50sx1-shard-00-01.xzv6fcr.mongodb.net:27017,ac-jx50sx1-shard-00-02.xzv6fcr.mongodb.net:27017/?ssl=true&replicaSet=atlas-hsxnjk-shard-0&authSource=admin"
+"
 
 # --- ডাটাবেজ কানেকশন ---
 client = MongoClient(MONGO_URI)
