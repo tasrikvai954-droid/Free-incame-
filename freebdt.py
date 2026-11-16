@@ -7,10 +7,11 @@ import telebot
 from flask import Flask
 
 # --- কনফিগারেশন ---
-TOKEN = "9217765647:AAHKkElKTFUhAkXsfwAORAIWwdKknFaz7Uo"  # আপনার টেলিগ্রাম বটের টোকেন এখানে দিন
-ADMIN_ID = 7275466137  # আপনার টেলিগ্রাম আইডি (সংখ্যায়)
+TOKEN = "9059189356:AAHVOeI_nXXfeL5G8KRbtIDUEtwJfCXb6IA"  # আপনার টেলিগ্রাম বটের টোকেন এখানে দিন
+ADMIN_ID = 7833766898  # আপনার টেলিগ্রাম আইডি (সংখ্যায়)
 
 DB_FILE = "database.json"
+CAPTCHA_SESSIONS = {}  # ক্যাপচা সেশন সংরক্ষণের জন্য
 
 # --- ডাটাবেজ হ্যান্ডলার ---
 
@@ -22,6 +23,7 @@ def load_db():
         "settings": {
             "signup_bonus": 50,
             "refer_bonus": 10,
+            "daily_bonus": 15,
             "min_withdraw": 500,
             "maintenance": False,
             "auto_payout": True,
@@ -30,6 +32,7 @@ def load_db():
             ),
         },
         "channels": [],
+        "tasks": [],
         "payouts": [],
         "banned_users": [],
         "ip_registry": {},  # ডিভাইস ফিঙ্গারপ্রিন্টিং ও আইপি ট্র্যাকিং
@@ -39,13 +42,19 @@ def load_db():
     return initial_data
   try:
     with open(DB_FILE, "r", encoding="utf-8") as f:
-      return json.load(f)
+      data = json.load(f)
+      if "daily_bonus" not in data.get("settings", {}):
+        data["settings"]["daily_bonus"] = 15
+      if "tasks" not in data:
+        data["tasks"] = []
+      return data
   except Exception:
     return {
         "users": {},
         "settings": {
             "signup_bonus": 50,
             "refer_bonus": 10,
+            "daily_bonus": 15,
             "min_withdraw": 500,
             "maintenance": False,
             "auto_payout": True,
@@ -54,6 +63,7 @@ def load_db():
             ),
         },
         "channels": [],
+        "tasks": [],
         "payouts": [],
         "banned_users": [],
         "ip_registry": {},
@@ -82,7 +92,10 @@ def get_main_keyboard(user_id):
       telebot.types.KeyboardButton("💰 𝑴𝒚 𝑩𝒂𝒍𝒂𝒏𝒄𝒆"),
       telebot.types.KeyboardButton("👥 𝑰𝒏𝒗𝒊𝒕𝒆 𝑭𝒓𝒊𝒆𝒏𝒅"),
   )
-  markup.add(telebot.types.KeyboardButton("💳 𝑾𝒊𝒕𝒉𝒅𝒓𝒂𝒘 𝑴𝒐𝒏𝒆𝒚"))
+  markup.add(
+      telebot.types.KeyboardButton("💳 𝑾𝒊𝒕𝒉𝒅𝒓𝒂𝒘 𝑴𝒐𝒏𝒆𝒚"),
+      telebot.types.KeyboardButton("🎯 𝑫𝒂𝒊𝒍𝒚 𝑻𝒂𝒔𝒌𝒔"),
+  )
   markup.add(
       telebot.types.KeyboardButton("🎁 𝑫𝒂𝒊𝒍𝒚 𝑩𝒐𝒏𝒖𝒔"),
       telebot.types.KeyboardButton("🏆 𝑻𝒐𝒑 𝑳𝒆𝒂𝒅𝒆𝒓𝒔"),
@@ -112,12 +125,11 @@ def check_forced_join(user_id):
   return len(not_joined) == 0, not_joined
 
 
-# --- /start কমান্ড ও সিকিউরিটি লেয়ার ---
+# --- /start কমান্ড ও সিকিউরিটি লেয়ার (ম্যাথ ক্যাপচা সহ) ---
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
   user_id = str(message.from_user.id)
   username = message.from_user.username or "𝑵𝒐_𝑼𝒔𝒆𝒓𝒏𝒂𝒎𝒆"
-  name = message.from_user.first_name
 
   db = load_db()
   config = db["settings"]
@@ -138,8 +150,51 @@ def cmd_start(message):
     )
     return
 
-  # ফোর্স জয়েন সিকিউরিটি চেক
-  is_joined, missing_channels = check_forced_join(int(user_id))
+  # রেফারেল পার্সিং সংরক্ষণ
+  args = message.text.split()
+  referrer_id = "none"
+  if len(args) > 1 and args[1].startswith("ref_"):
+    referrer_id = args[1].replace("ref_", "")
+
+  # নতুন ইউজারদের জন্য ম্যাথ ক্যাপচা ভেরিফিকেশন
+  if user_id not in db["users"]:
+    num1 = random.randint(1, 9)
+    num2 = random.randint(1, 9)
+    ans = num1 + num2
+    CAPTCHA_SESSIONS[user_id] = {
+        "ans": ans,
+        "ref": referrer_id,
+    }
+
+    options = [ans, ans + random.randint(1, 3), abs(ans - random.randint(1, 3))]
+    random.shuffle(options)
+
+    markup = telebot.types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        telebot.types.InlineKeyboardButton(
+            str(options[0]), callback_data=f"cap_{user_id}_{options[0]}"
+        ),
+        telebot.types.InlineKeyboardButton(
+            str(options[1]), callback_data=f"cap_{user_id}_{options[1]}"
+        ),
+        telebot.types.InlineKeyboardButton(
+            str(options[2]), callback_data=f"cap_{user_id}_{options[2]}"
+        ),
+    )
+    bot.send_message(
+        message.chat.id,
+        f"🤖 **সিকিউরিটি ক্যাপচা ভেরিফিকেশন:**\n\n*ফেক রেফার ও বট প্রতিরোধ করতে"
+        f" নিচের প্রশ্নের সঠিক উত্তর দিন:*\n\n**{num1} + {num2} = ?**",
+        reply_markup=markup,
+    )
+    return
+
+  # বিদ্যমান ইউজারদের জন্য ফোর্স জয়েন চেক
+  proceed_after_captcha(message.chat.id, int(user_id))
+
+
+def proceed_after_captcha(chat_id, user_id):
+  is_joined, missing_channels = check_forced_join(user_id)
   if not is_joined:
     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
     for ch in missing_channels:
@@ -154,7 +209,7 @@ def cmd_start(message):
         )
     )
     bot.send_message(
-        message.chat.id,
+        chat_id,
         "🚨 **সিকিউরিটি অ্যালার্ট!**\n\n*বট ব্যবহার করার জন্য নিচের চ্যানেলগুলোতে"
         " অবশ্যই জয়েন করতে হবে। জয়েন করার পর নিচে* **𝑪𝒉𝒆𝒄𝒌 𝑴𝒆𝒎𝒃𝒆𝒓𝒔𝒉𝒊𝒑**"
         " *বাটনে ক্লিক করুন।*",
@@ -162,85 +217,115 @@ def cmd_start(message):
     )
     return
 
-  # রেফারেল পার্সিং ও অ্যান্টি-ফেক রেফার (Device Fingerprinting & Account Check)
-  args = message.text.split()
-  referrer_id = None
-  if len(args) > 1 and args[1].startswith("ref_"):
-    referrer_id = args[1].replace("ref_", "")
-
-  # নতুন ইউজার রেজিস্ট্রেশন
-  if user_id not in db["users"]:
-    # অ্যাকাউন্ট এইজ ও অ্যাক্টিভিটি চেক (ইউজারনেম না থাকলে ফেক হিসেবে সন্দেহ করা)
-    is_fake_suspect = False
-    if username == "𝑵𝒐_𝑼𝒔𝒆𝒓𝒏𝒂𝒎𝒆":
-      is_fake_suspect = True
-
-    # ডিভাইস ফিঙ্গারপ্রিন্টিং চেক (আইপি বা ইউজার সেশন সিমুলেশন)
-    if "ip_registry" not in db:
-      db["ip_registry"] = {}
-
-    signup_bonus = config.get("signup_bonus", 50)
-    db["users"][user_id] = {
-        "name": name,
-        "username": username,
-        "balance": signup_bonus,
-        "today_earn": signup_bonus,
-        "today_withdraw": 0,
-        "referrals": 0,
-        "referred_by": referrer_id,
-        "bKash": None,
-        "Nagad": None,
-        "last_bonus_time": 0,
-        "join_date": time.strftime("%Y-%m-%d"),
-        "transactions": [{
-            "type": "𝑺𝒊𝒈𝒏-𝒖𝒑 𝑩𝒐𝒏𝒖𝒔",
-            "amount": signup_bonus,
-            "time": time.strftime("%Y-%m-%d %H:%M"),
-        }],
-    }
-
-    # রেফার বোনাস ও ফেক রেফার ফিল্টার
-    if (
-        referrer_id
-        and referrer_id != user_id
-        and referrer_id in db["users"]
-        and not is_fake_suspect
-    ):
-      ref_bonus = config.get("refer_bonus", 10)
-      db["users"][referrer_id]["balance"] += ref_bonus
-      db["users"][referrer_id]["today_earn"] += ref_bonus
-      db["users"][referrer_id]["referrals"] += 1
-
-      if "transactions" not in db["users"][referrer_id]:
-        db["users"][referrer_id]["transactions"] = []
-      db["users"][referrer_id]["transactions"].append({
-          "type": f"𝑹𝒆𝒇𝒆𝒓𝒓𝒂𝒍 𝑪𝒐𝒎𝒎𝒊𝒔𝒔𝒊𝒐𝒏 (@{username})",
-          "amount": ref_bonus,
-          "time": time.strftime("%Y-%m-%d %H:%M"),
-      })
-
-      try:
-        bot.send_message(
-            int(referrer_id),
-            f"🔥 **নতুন রেফার যুক্ত হয়েছে!**\n*আপনার অ্যাকাউন্টে বোনাস হিসেবে*"
-            f" **৳{ref_bonus}** *যোগ করা হয়েছে।*",
-        )
-      except Exception:
-        pass
-
-    save_db(db)
-    bot.send_message(
-        message.chat.id,
-        f"🎉 **অভিনন্দন {name}!**\n\n*সফলভাবে সিকিউরিটি চেক পার করার জন্য আপনি"
-        f" সাইন-আপ বোনাস* **৳{signup_bonus}** *ফ্রি পেয়েছেন!* 🎁",
-    )
-
+  db = load_db()
+  config = db["settings"]
   notice = config.get("pinned_notice", "")
   bot.send_message(
-      message.chat.id,
+      chat_id,
       f"{notice}\n\n👇 **নিচের মেনু থেকে আপনার কাঙ্ক্ষিত অপশন সিলেক্ট করুন:**",
-      reply_markup=get_main_keyboard(int(user_id)),
+      reply_markup=get_main_keyboard(user_id),
   )
+
+
+# --- ক্যাপচা উত্তর যাচাই কলব্যাক ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cap_"))
+def callback_captcha(call):
+  parts = call.data.split("_")
+  target_uid = parts[1]
+  selected_val = int(parts[2])
+  user_id = str(call.from_user.id)
+
+  if user_id != target_uid:
+    bot.answer_callback_query(call.id, "❌ এটি আপনার জন্য নয়!", show_alert=True)
+    return
+
+  session = CAPTCHA_SESSIONS.get(user_id)
+  if not session:
+    bot.answer_callback_query(
+        call.id, "⚠️ সেশন এক্সপায়ার হয়ে গেছে। পুনরায় /start দিন।", show_alert=True
+    )
+    return
+
+  if selected_val == session["ans"]:
+    del CAPTCHA_SESSIONS[user_id]
+    bot.answer_callback_query(
+        call.id, "✅ ক্যাপচা সফলভাবে সম্পন্ন হয়েছে!", show_alert=True
+    )
+    try:
+      bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+      pass
+
+    # ইউজার রেজিস্ট্রেশন ও বোনাস প্রসেসিং
+    username = call.from_user.username or "𝑵𝒐_𝑼𝒔𝒆𝒓𝒏𝒂𝒎𝒆"
+    name = call.from_user.first_name
+    referrer_id = None if session["ref"] == "none" else session["ref"]
+
+    db = load_db()
+    config = db["settings"]
+
+    if user_id not in db["users"]:
+      # হাই-কোয়ালিটি অ্যান্টি-ফেক রেফার সিস্টেম (ইউজারনেম না থাকলে ফেক হিসেবে ফ্ল্যাগ করা)
+      is_fake_suspect = username == "𝑵𝒐_𝑼𝒔𝒆𝒓𝒏𝒂𝒎𝒆"
+
+      signup_bonus = config.get("signup_bonus", 50)
+      db["users"][user_id] = {
+          "name": name,
+          "username": username,
+          "balance": signup_bonus,
+          "today_earn": signup_bonus,
+          "today_withdraw": 0,
+          "referrals": 0,
+          "referred_by": referrer_id,
+          "bKash": None,
+          "Nagad": None,
+          "last_bonus_time": 0,
+          "join_date": time.strftime("%Y-%m-%d"),
+          "completed_tasks": [],
+          "transactions": [{
+              "type": "𝑺𝒊𝒈𝒏-𝒖𝒑 𝑩𝒐𝒏𝒖𝒔",
+              "amount": signup_bonus,
+              "time": time.strftime("%Y-%m-%d %H:%M"),
+          }],
+      }
+
+      if (
+          referrer_id
+          and referrer_id != user_id
+          and referrer_id in db["users"]
+          and not is_fake_suspect
+      ):
+        ref_bonus = config.get("refer_bonus", 10)
+        db["users"][referrer_id]["balance"] += ref_bonus
+        db["users"][referrer_id]["today_earn"] += ref_bonus
+        db["users"][referrer_id]["referrals"] += 1
+
+        if "transactions" not in db["users"][referrer_id]:
+          db["users"][referrer_id]["transactions"] = []
+        db["users"][referrer_id]["transactions"].append({
+            "type": f"𝑹𝒆𝒇𝒆𝒓𝒓𝒂𝒍 𝑪𝒐𝒎𝒎𝒊𝒔𝒔𝒊𝒐𝒏 (@{username})",
+            "amount": ref_bonus,
+            "time": time.strftime("%Y-%m-%d %H:%M"),
+        })
+
+        try:
+          bot.send_message(
+              int(referrer_id),
+              f"🔥 **নতুন রেফার যুক্ত হয়েছে!**\n*আপনার অ্যাকাউন্টে বোনাস হিসেবে*"
+              f" **৳{ref_bonus}** *যোগ করা হয়েছে।*",
+          )
+        except Exception:
+          pass
+
+      save_db(db)
+
+    proceed_after_captcha(call.message.chat.id, int(user_id))
+  else:
+    bot.answer_callback_query(
+        call.id,
+        "❌ ভুল উত্তর! পুনরায় সঠিক উত্তরে ক্লিক করুন।",
+        show_alert=True,
+    )
 
 
 # --- মেম্বারশিপ চেক কলব্যাক ---
@@ -258,7 +343,7 @@ def callback_check_join(call):
       bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
       pass
-    cmd_start(call.message)
+    proceed_after_captcha(call.message.chat.id, user_id)
   else:
     bot.answer_callback_query(
         call.id,
@@ -267,13 +352,14 @@ def callback_check_join(call):
     )
 
 
-# --- ইউজার মেনু অপশন হ্যান্ডলার (স্ট্রিক্ট ফোর্স-জয়েন অডিট সহ) ---
+# --- ইউজার মেনু অপশন হ্যান্ডলার ---
 @bot.message_handler(
     func=lambda message: message.text
     in [
         "💰 𝑴𝒚 𝑩𝒂𝒍𝒂𝒏𝒄𝒆",
         "👥 𝑰𝒏𝒗𝒊𝒕𝒆 𝑭𝒓𝒊𝒆𝒏𝒅",
         "💳 𝑾𝒊𝒕𝒉𝒅𝒓𝒂𝒘 𝑴𝒐𝒏𝒆𝒚",
+        "🎯 𝑫𝒂𝒊𝒍𝒚 𝑻𝒂𝒔𝒌𝒔",
         "🎁 𝑫𝒂𝒊𝒍𝒚 𝑩𝒐𝒏𝒖𝒔",
         "🏆 𝑻𝒐𝒑 𝑳𝒆𝒂𝒅𝒆𝒓𝒔",
         "👑 𝑨𝒅𝒎𝒊𝒏 𝑷𝒂𝒏𝒆𝒍",
@@ -317,6 +403,7 @@ def handle_user_actions(message):
           "referrals": 0,
           "name": "User",
           "transactions": [],
+          "completed_tasks": [],
       },
   )
 
@@ -378,9 +465,35 @@ def handle_user_actions(message):
         message.chat.id,
         f"💳 **উইথড্র পোর্টাল:**\n\n💰 মোট ব্যালেন্স: **৳{balance}**\n🎯 ন্যূনতম"
         f" লিমিট: **৳{min_w}**\n\nপ্রোগ্রেস:\n{bar}"
-        f" `({balance}/{min_w})`\n\n{('✅ *উইথড্র করার জন্য আপনার পর্যাপ্ত ব্যালেন্স রয়েছে!*' if balance >= min_w else '❌ *পর্যাপ্ত ব্যালেন্স নেই। রেফার করে ব্যালেন্স পূর্ণ করুন।*')}",
+        f" `({balance}/{min_w})`\n\n{('✅ *উইথড্র করার জন্য আপনার পর্যাপ্ত ব্যালেন্স রয়েছে!*' if balance >= min_w else '❌ *পর্যাপ্ত ব্যালেন্স নেই। রেফার বা টাস্ক সম্পন্ন করে ব্যালেন্স পূর্ণ করুন।*')}",
         reply_markup=markup,
     )
+
+  elif text == "🎯 𝑫𝒂𝒊𝒍𝒚 𝑻𝒂𝒔𝒌𝒔":
+    tasks = db.get("tasks", [])
+    completed = user_data.get("completed_tasks", [])
+    
+    # শুধুমাত্র যে টাস্কগুলো ইউজার এখনো সম্পন্ন করেনি তা ফিল্টার করা
+    available_tasks = [(idx, tsk) for idx, tsk in enumerate(tasks) if idx not in completed]
+
+    if not available_tasks:
+      bot.send_message(
+          message.chat.id,
+          "📭 বর্তমানে আপনার জন্য কোনো নতুন টাস্ক নেই। কিছু সময় পর আবার চেষ্টা করুন।",
+      )
+      return
+
+    for idx, tsk in available_tasks:
+      markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+      markup.add(
+          telebot.types.InlineKeyboardButton("📢 𝑱𝒐𝒊𝒏 𝑪𝒉𝒂𝒏𝒏𝒆𝒍", url=tsk["link"]),
+          telebot.types.InlineKeyboardButton("✅ 𝑽𝒆𝒓𝒊𝒇𝒚 & 𝑪𝒍𝒂𝒊𝒎", callback_data=f"verify_task_{idx}"),
+      )
+      bot.send_message(
+          message.chat.id,
+          f"📌 **টাস্ক:** {tsk['title']}\n🎁 **রিওয়ার্ড:** ৳{tsk['reward']}\n\n*চ্যানেলে জয়েন করে নিচে ভেরিফাই বাটনে ক্লিক করুন:*",
+          reply_markup=markup,
+      )
 
   elif text == "🎁 𝑫𝒂𝒊𝒍𝒚 𝑩𝒐𝒏𝒖𝒔":
     now = time.time()
@@ -403,7 +516,7 @@ def handle_user_actions(message):
           f" করুন:* **{hrs} ঘণ্টা {mins} মিনিট**।",
       )
     else:
-      bonus_amt = 15
+      bonus_amt = config.get("daily_bonus", 15)
       db["users"][user_id]["balance"] += bonus_amt
       db["users"][user_id]["today_earn"] += bonus_amt
       db["users"][user_id]["last_bonus_time"] = now
@@ -457,6 +570,12 @@ def handle_user_actions(message):
             "📋 𝑳𝒊𝒔𝒕 𝑪𝒉𝒂𝒏𝒏𝒆𝒍𝒔", callback_data="adm_listch"
         ),
         telebot.types.InlineKeyboardButton(
+            "➕ 𝑨𝒅𝒅 𝑻𝒂𝒔𝒌", callback_data="adm_addtask"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "📋 𝑳𝒊𝒔𝒕 / 𝑫𝒆𝒍 𝑻𝒂𝒔𝒌𝒔", callback_data="adm_listtasks"
+        ),
+        telebot.types.InlineKeyboardButton(
             "💳 𝑷𝒂𝒚𝒐𝒖𝒕 𝑹𝒆𝒒𝒖𝒆𝒔𝒕𝒔", callback_data="adm_payouts"
         ),
         telebot.types.InlineKeyboardButton(
@@ -467,6 +586,9 @@ def handle_user_actions(message):
         ),
         telebot.types.InlineKeyboardButton(
             "👥 𝑹𝒆𝒇𝒆𝒓 𝑩𝒐𝒏𝒖𝒔", callback_data="adm_refbonus"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "🎁 𝑺𝒆𝒕 𝑫𝒂𝒊𝒍𝒚 𝑩𝒐𝒏𝒖𝒔", callback_data="adm_dailybonus"
         ),
         telebot.types.InlineKeyboardButton(
             "📢 𝑩𝒓𝒐𝒂𝒅𝒄𝒂𝒔𝒕 𝑨𝒍𝒍", callback_data="adm_bc"
@@ -499,7 +621,64 @@ def callback_router(call):
   db = load_db()
   data = call.data
 
-  if data == "bal_history":
+  # টাস্ক ভেরিফিকেশন হ্যান্ডলার
+  if data.startswith("verify_task_"):
+    idx = int(data.split("_")[2])
+    tasks = db.get("tasks", [])
+    if idx < len(tasks):
+      tsk = tasks[idx]
+      user_data = db["users"].get(user_id, {})
+      completed = user_data.get("completed_tasks", [])
+
+      if idx in completed:
+        bot.answer_callback_query(call.id, "⚠️ আপনি ইতিমধ্যে এই টাস্কটি সম্পন্ন করেছেন!", show_alert=True)
+        return
+
+      # চ্যানেল মেম্বারশিপ চেক
+      channel_id = tsk["channel_id"]
+      is_task_joined = True
+      try:
+        member = bot.get_chat_member(channel_id, int(user_id))
+        if member.status not in ["creator", "administrator", "member"]:
+          is_task_joined = False
+      except Exception:
+        is_task_joined = False
+
+      if not is_task_joined:
+        bot.answer_callback_query(call.id, "❌ আপনি এখনো চ্যানেলে জয়েন করেননি! দয়া করে জয়েন করুন।", show_alert=True)
+        return
+
+      # রিওয়ার্ড প্রদান ও টাস্ক সম্পন্ন মার্ক করা
+      reward = tsk["reward"]
+      db["users"][user_id]["balance"] += reward
+      db["users"][user_id]["today_earn"] += reward
+      
+      if "completed_tasks" not in db["users"][user_id]:
+        db["users"][user_id]["completed_tasks"] = []
+      db["users"][user_id]["completed_tasks"].append(idx)
+
+      if "transactions" not in db["users"][user_id]:
+        db["users"][user_id]["transactions"] = []
+      db["users"][user_id]["transactions"].append({
+          "type": f"𝑻𝒂𝒔𝒌 𝑹𝒆𝒘𝒂𝒓𝒅 ({tsk['title']})",
+          "amount": reward,
+          "time": time.strftime("%Y-%m-%d %H:%M"),
+      })
+      save_db(db)
+
+      bot.answer_callback_query(call.id, f"✅ টাস্ক সফল! ৳{reward} আপনার ব্যালেন্সে যোগ হয়েছে।", show_alert=True)
+      try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+      except Exception:
+        pass
+      bot.send_message(
+          call.message.chat.id,
+          f"🎉 অভিনন্দন! **{tsk['title']}** টাস্ক সফলভাবে সম্পন্ন করার জন্য আপনি **৳{reward}** পুরস্কার পেয়েছেন।",
+      )
+    else:
+      bot.answer_callback_query(call.id, "⚠️ টাস্কটি আর উপলব্ধ নেই।", show_alert=True)
+
+  elif data == "bal_history":
     user_data = db["users"].get(user_id, {})
     txs = user_data.get("transactions", [])
     if not txs:
@@ -550,7 +729,7 @@ def callback_router(call):
   # --- পেমেন্ট অ্যাপ্রুভ/রিজেক্ট কলব্যাক হ্যান্ডলার ---
   elif data.startswith("pay_action_") and int(user_id) == ADMIN_ID:
     parts = data.split("_")
-    action = parts[2]  # approve বা reject
+    action = parts[2]
     req_idx = int(parts[3])
     payouts = db.get("payouts", [])
 
@@ -578,7 +757,6 @@ def callback_router(call):
           pass
 
       elif action == "reject":
-        # টাকা ইউজারের ব্যালেন্সে ফেরত দেওয়া
         if target_uid in db["users"]:
           db["users"][target_uid]["balance"] += amount
           db["users"][target_uid]["today_withdraw"] -= amount
@@ -613,9 +791,6 @@ def callback_router(call):
     if data == "adm_stats":
       total_users = len(db["users"])
       total_payouts = len(db.get("payouts", []))
-      total_paid_sum = sum(
-          p.get("amount", 0) for p in db.get("history_payouts", [])
-      )
       bot.answer_callback_query(
           call.id,
           f"📈 𝑨𝒅𝒗𝒂𝒏𝒄𝒆𝒅 𝑫𝒂𝒔𝒉𝒃𝒐𝒂𝒓𝒅:\n- মোট ইউজার: {total_users}\n- পেন্ডিং উইথড্র:"
@@ -674,6 +849,10 @@ def callback_router(call):
             f"✅ সফলভাবে ডিলিট করা হয়েছে: {removed['name']}",
             show_alert=True,
         )
+        try:
+          bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+          pass
 
     elif data == "adm_addch":
       msg = bot.send_message(
@@ -682,6 +861,50 @@ def callback_router(call):
           " @ChannelUsername | https://t.me/...`",
       )
       bot.register_next_step_handler(msg, save_new_channel)
+
+    elif data == "adm_addtask":
+      msg = bot.send_message(
+          ADMIN_ID,
+          "➕ নতুন টাস্ক যুক্ত করতে এই ফরম্যাটে লিখুন:\n`Task Title | @ChannelUsername | Link | Reward`\n(যেমন: `Join Channel | @mychannel | https://t.me/mychannel | 10`)",
+      )
+      bot.register_next_step_handler(msg, save_new_task)
+
+    elif data == "adm_listtasks":
+      tasks = db.get("tasks", [])
+      if not tasks:
+        bot.answer_callback_query(
+            call.id, "📭 বর্তমানে কোনো টাস্ক নেই।", show_alert=True
+        )
+      else:
+        markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+        for idx, tsk in enumerate(tasks):
+          markup.add(
+              telebot.types.InlineKeyboardButton(
+                  f"🗑️ 𝑫𝒆𝒍𝒆𝒕𝒆: {tsk['title']} (৳{tsk['reward']})",
+                  callback_data=f"del_task_{idx}",
+              )
+          )
+        bot.send_message(
+            ADMIN_ID,
+            "📋 **টাস্ক লিস্ট (ডিলিট করতে বাটনে ক্লিক করুন):**",
+            reply_markup=markup,
+        )
+
+    elif data.startswith("del_task_"):
+      idx = int(data.split("_")[2])
+      tasks = db.get("tasks", [])
+      if idx < len(tasks):
+        removed = tasks.pop(idx)
+        save_db(db)
+        bot.answer_callback_query(
+            call.id,
+            f"✅ সফলভাবে ডিলিট হয়েছে: {removed['title']}",
+            show_alert=True,
+        )
+        try:
+          bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+          pass
 
     elif data == "adm_minw":
       msg = bot.send_message(
@@ -700,6 +923,12 @@ def callback_router(call):
           ADMIN_ID, "👥 নতুন রেফার কমিশন পরিমাণ লিখুন (যেমন: 10):"
       )
       bot.register_next_step_handler(msg, update_refer_bonus)
+
+    elif data == "adm_dailybonus":
+      msg = bot.send_message(
+          ADMIN_ID, "🎁 নতুন ডেইলি বোনাস পরিমাণ লিখুন (যেমন: 15):"
+      )
+      bot.register_next_step_handler(msg, update_daily_bonus)
 
     elif data == "adm_bc":
       markup = telebot.types.InlineKeyboardMarkup(row_width=2)
@@ -735,7 +964,7 @@ def callback_router(call):
       msg = bot.send_message(
           ADMIN_ID,
           "⚙️ ব্যালেন্স এডিট করতে এই ফরম্যাটে লিখুন:\n`UserID | Amount`"
-          " (ឧ: `123456789 | 100` বা `-50` কাটা যাবে)",
+          " (যেমন: `123456789 | 100` বা `-50`)",
       )
       bot.register_next_step_handler(msg, execute_balance_adjust)
 
@@ -853,6 +1082,27 @@ def save_new_channel(message):
     )
 
 
+def save_new_task(message):
+  try:
+    parts = message.text.split("|")
+    title = parts[0].strip()
+    channel_id = parts[1].strip()
+    link = parts[2].strip()
+    reward = int(parts[3].strip())
+    db = load_db()
+    if "tasks" not in db:
+      db["tasks"] = []
+    db["tasks"].append({"title": title, "channel_id": channel_id, "link": link, "reward": reward})
+    save_db(db)
+    bot.send_message(
+        ADMIN_ID, f"✅ সফলভাবে টাস্ক যুক্ত করা হয়েছে: {title} (৳{reward})"
+    )
+  except Exception:
+    bot.send_message(
+        ADMIN_ID, "❌ ফরম্যাট ভুল! ব্যবহার করুন: `Task Title | @ChannelUsername | Link | Reward`"
+    )
+
+
 def update_min_withdraw(message):
   try:
     val = int(message.text.strip())
@@ -884,6 +1134,17 @@ def update_refer_bonus(message):
     db["settings"]["refer_bonus"] = val
     save_db(db)
     bot.send_message(ADMIN_ID, f"✅ রেফার বোনাস সফলভাবে ৳{val} করা হয়েছে।")
+  except Exception:
+    bot.send_message(ADMIN_ID, "❌ সঠিক সংখ্যা লিখুন।")
+
+
+def update_daily_bonus(message):
+  try:
+    val = int(message.text.strip())
+    db = load_db()
+    db["settings"]["daily_bonus"] = val
+    save_db(db)
+    bot.send_message(ADMIN_ID, f"✅ ডেইলি বোনাস সফলভাবে ৳{val} করা হয়েছে।")
   except Exception:
     bot.send_message(ADMIN_ID, "❌ সঠিক সংখ্যা লিখুন।")
 
