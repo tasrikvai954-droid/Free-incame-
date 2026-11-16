@@ -621,8 +621,10 @@ def callback_router(call):
   db = load_db()
   data = call.data
 
-  # টাস্ক ভেরিফিকেশন হ্যান্ডলার
-  if data.startswith("verify_task_"):
+  if data == "noop":
+    bot.answer_callback_query(call.id, "✅ এই টাস্কটি আগেই সম্পন্ন করেছেন।", show_alert=False)
+
+  elif data.startswith("verify_task_"):
     idx = int(data.split("_")[2])
     tasks = db.get("tasks", [])
     if idx < len(tasks):
@@ -786,6 +788,49 @@ def callback_router(call):
     else:
       bot.answer_callback_query(call.id, "⚠️ রিকোয়েস্টটি ইতিমধ্যে প্রসেস করা হয়েছে।", show_alert=True)
 
+  # --- চ্যানেল ডিলিট হ্যান্ডলার (বাগ ফিক্সড) ---
+  elif data.startswith("del_ch_") and int(user_id) == ADMIN_ID:
+    idx = int(data.split("_")[2])
+    channels = db.get("channels", [])
+    if idx < len(channels):
+      removed = channels.pop(idx)
+      save_db(db)
+      bot.answer_callback_query(
+          call.id,
+          f"✅ সফলভাবে ডিলিট করা হয়েছে: {removed['name']}",
+          show_alert=True,
+      )
+      try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+      except Exception:
+        pass
+
+  # --- টাস্ক ডিলিট হ্যান্ডলার (বাগ ফিক্সড) ---
+  elif data.startswith("del_task_") and int(user_id) == ADMIN_ID:
+    idx = int(data.split("_")[2])
+    tasks = db.get("tasks", [])
+    if idx < len(tasks):
+      removed = tasks.pop(idx)
+      save_db(db)
+      bot.answer_callback_query(
+          call.id,
+          f"✅ সফলভাবে ডিলিট হয়েছে: {removed['title']}",
+          show_alert=True,
+      )
+      try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+      except Exception:
+        pass
+
+  # --- ব্রডকাস্ট ক্যাটাগরি হ্যান্ডলার (বাগ ফিক্সড) ---
+  elif data.startswith("bc_type_") and int(user_id) == ADMIN_ID:
+    btype = data.split("_")[2]
+    msg = bot.send_message(
+        ADMIN_ID,
+        f"📢 সিলেক্টেড ক্যাটাগরি: **{btype.upper()}**\nব্রডকাস্ট মেসেজটি লিখুন:",
+    )
+    bot.register_next_step_handler(msg, execute_broadcast, btype)
+
   # --- অ্যাডমিন কলব্যাকসমূহ ---
   elif data.startswith("adm_") and int(user_id) == ADMIN_ID:
     if data == "adm_stats":
@@ -838,22 +883,6 @@ def callback_router(call):
             reply_markup=markup,
         )
 
-    elif data.startswith("del_ch_"):
-      idx = int(data.split("_")[2])
-      channels = db.get("channels", [])
-      if idx < len(channels):
-        removed = channels.pop(idx)
-        save_db(db)
-        bot.answer_callback_query(
-            call.id,
-            f"✅ সফলভাবে ডিলিট করা হয়েছে: {removed['name']}",
-            show_alert=True,
-        )
-        try:
-          bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-          pass
-
     elif data == "adm_addch":
       msg = bot.send_message(
           ADMIN_ID,
@@ -889,22 +918,6 @@ def callback_router(call):
             "📋 **টাস্ক লিস্ট (ডিলিট করতে বাটনে ক্লিক করুন):**",
             reply_markup=markup,
         )
-
-    elif data.startswith("del_task_"):
-      idx = int(data.split("_")[2])
-      tasks = db.get("tasks", [])
-      if idx < len(tasks):
-        removed = tasks.pop(idx)
-        save_db(db)
-        bot.answer_callback_query(
-            call.id,
-            f"✅ সফলভাবে ডিলিট হয়েছে: {removed['title']}",
-            show_alert=True,
-        )
-        try:
-          bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-          pass
 
     elif data == "adm_minw":
       msg = bot.send_message(
@@ -945,14 +958,6 @@ def callback_router(call):
           "📢 **ব্রডকাস্ট ক্যাটাগরি সিলেক্ট করুন:**",
           reply_markup=markup,
       )
-
-    elif data.startswith("bc_type_") and int(user_id) == ADMIN_ID:
-      btype = data.split("_")[2]
-      msg = bot.send_message(
-          ADMIN_ID,
-          f"📢 সিলেক্টেড ক্যাটাগরি: **{btype.upper()}**\nব্রডকাস্ট মেসেজটি লিখুন:",
-      )
-      bot.register_next_step_handler(msg, execute_broadcast, btype)
 
     elif data == "adm_lookup":
       msg = bot.send_message(
