@@ -7,8 +7,8 @@ import telebot
 from flask import Flask
 
 # --- কনফিগারেশন ---
-TOKEN = "9059189356:AAFC80sK3Feeg5qKfGmU5y_UtqSL9OxOZxk"  # আপনার টেলিগ্রাম বটের টোকেন এখানে দিন
-ADMIN_ID = 7833766898  # আপনার টেলিগ্রাম আইডি (সংখ্যায়)
+TOKEN = "9217765647:AAHMQvpdnxSt8ruAfOTJowS8IqTnaTtmbmk"  # আপনার টেলিগ্রাম বটের টোকেন এখানে দিন
+ADMIN_ID = 7275466137  # আপনার টেলিগ্রাম আইডি (সংখ্যায়)
 
 DB_FILE = "database.json"
 CAPTCHA_SESSIONS = {}  # ক্যাপচা সেশন সংরক্ষণের জন্য
